@@ -788,9 +788,18 @@ class LlamaDecoderLayer(nn.Module):
                 "Passing `padding_mask` is deprecated and will be removed in v4.37. Please make sure use `attention_mask` instead.`"
             )
 
+        def addv(sublayer_id):
+            # Note: llm_dumper and layer_id are added by the caller code.
+            if hasattr(self, "llm_dumper") and self.llm_dumper is not None:
+                assert self.layer_id is not None
+                self.llm_dumper.add_vectors(self.layer_id, sublayer_id, position_ids, hidden_states)
+
         residual = hidden_states
 
+        # add_vector here before LN1 & attn (which is already done from previous layer's output)
         hidden_states = self.input_layernorm(hidden_states)
+        # add_vector here after LN1 & before attn
+        addv(0)
 
         # Self Attention
         hidden_states, self_attn_weights, present_key_value = self.self_attn(
@@ -802,13 +811,23 @@ class LlamaDecoderLayer(nn.Module):
             use_cache=use_cache,
             **kwargs,
         )
+        # add_vector here after LN1 & attn
+        addv(1)
         hidden_states = residual + hidden_states
+        # add_vector here after LN1 & attn + residual
+        addv(2)
 
         # Fully Connected
         residual = hidden_states
         hidden_states = self.post_attention_layernorm(hidden_states)
+        # add_vector here after LN2 & before mlp
+        addv(3)
         hidden_states = self.mlp(hidden_states)
+        # add_vector here after LN2 & after mlp
+        addv(4)
         hidden_states = residual + hidden_states
+        # add_vector here after LN2 & after mlp + residual
+        addv(5)
 
         outputs = (hidden_states,)
 
